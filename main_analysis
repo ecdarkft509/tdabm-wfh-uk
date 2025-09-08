@@ -1,0 +1,694 @@
+##1.LAD23boundaries
+import geopandas as gpd
+import pandas as pd
+import matplotlib.pyplot as plt
+
+# ===== 1) Path Configuration =====
+shp_path = r"C:\Users\BFSU\Desktop\UoM\semester2\ERP\data\LAdata\Local_Authority_Districts_May_2023_EW_BUC_-8744064012485962408\LAD_MAY_2023_EW_BUC_BESPOKE.shp"
+excel_path = r"C:\Users\BFSU\Desktop\UoM\semester2\ERP\data\LAdata\databasev2\datasetv5.xlsx"
+
+# ===== 2) Data Reading =====
+lad = gpd.read_file(shp_path)
+df = pd.read_excel(excel_path)
+
+df["lad23cd"] = df["lad23cd"].astype(str).str.upper().str.strip()
+lad["LAD23CD"] = lad["LAD23CD"].astype(str).str.upper().str.strip()
+
+gdf = lad.merge(df[["lad23cd", "lad23nm", "wfh19", "wfh21"]],
+                left_on="LAD23CD", right_on="lad23cd", how="left")
+
+# If values are ratios (0-1), convert to percentage
+if gdf["wfh19"].dropna().max() <= 1:
+    gdf["wfh19"] = gdf["wfh19"] * 100
+if gdf["wfh21"].dropna().max() <= 1:
+    gdf["wfh21"] = gdf["wfh21"] * 100
+
+# ===== 3) Plotting (Automatic Range) =====
+fig, axes = plt.subplots(1, 2, figsize=(14, 8), constrained_layout=True)
+
+# 2019 plot (automatic legend range)
+gdf.plot(column="wfh19", cmap="viridis", linewidth=0.15, edgecolor="black",
+         legend=True, legend_kwds={"shrink": 0.6}, ax=axes[0])
+axes[0].set_title("WFH rate 2019 (LAD 2023 boundaries)", fontsize=12)
+axes[0].axis("off")
+
+# 2021 plot (automatic legend range)
+gdf.plot(column="wfh21", cmap="viridis", linewidth=0.15, edgecolor="black",
+         legend=True, legend_kwds={"shrink": 0.6}, ax=axes[1])
+axes[1].set_title("WFH rate 2021 (LAD 2023 boundaries)", fontsize=12)
+axes[1].axis("off")
+
+plt.savefig("WFH_rates_auto.png", dpi=300, bbox_inches="tight")
+plt.savefig("WFH_rates_auto.pdf", dpi=300, bbox_inches="tight")
+plt.show()
+
+##2.Bar charts
+# -*- coding: utf-8 -*-
+# Draw Top-15 bar charts for WFH (2019, 2021, absolute change)
+# Input : C:\Users\BFSU\Desktop\UoM\semester2\ERP\data\LAdata\databasev2\datasetv5.xlsx
+# Output: C:\Users\BFSU\Desktop\UoM\semester2\ERP\data\eda\  
+
+import os
+import pandas as pd
+import matplotlib.pyplot as plt
+
+# -------- Paths --------
+BASE_DIR   = r"C:\Users\BFSU\Desktop\UoM\semester2\ERP\data"
+INPUT_XLS  = os.path.join(BASE_DIR, r"LAdata\databasev2", "datasetv5.xlsx")
+CHART_DIR  = os.path.join(BASE_DIR, "eda")
+os.makedirs(CHART_DIR, exist_ok=True)
+
+# -------- Load --------
+df = pd.read_excel(INPUT_XLS)
+
+needed_cols = {"lad23nm", "wfh19", "wfh21"}
+missing = needed_cols - set(map(str.lower, df.columns.str.lower()))
+df.columns = [c.lower() for c in df.columns]
+if missing:
+    raise ValueError(f"Missing required columns: {missing} (at least lad23nm, wfh19, wfh21 needed)")
+
+df = df.copy()
+
+# Data processing: ensure numeric columns are numeric type
+for c in ["wfh19", "wfh21"]:
+    df[c] = pd.to_numeric(df[c], errors="coerce")
+    
+# Calculate absolute change (percentage points)
+df["abs_change"] = df["wfh21"] - df["wfh19"]
+
+# -------- Plot helper (horizontal bar with value labels) --------
+def barh_top(df_in, value_col, label_col="lad23nm", topn=15, title="", x_label=None, file_name=None, fmt="{:.2f}"):
+    d = df_in.sort_values(value_col, ascending=False).head(topn).iloc[::-1]  
+    plt.figure(figsize=(10, max(6, topn * 0.45)))
+    bars = plt.barh(d[label_col], d[value_col])  
+    for b, v in zip(bars, d[value_col]):
+        plt.text(v, b.get_y() + b.get_height()/2, fmt.format(v),
+                 va="center", ha="left", fontsize=9)
+    plt.title(title)
+    plt.xlabel(x_label if x_label else value_col)
+    plt.tight_layout()
+    if file_name:
+        path = os.path.join(CHART_DIR, file_name)
+        plt.savefig(path, dpi=300)
+        print("Saved:", path)
+    plt.show()
+
+def barh_bottom(df_in, value_col, label_col="lad23nm", topn=15, title="", x_label=None, file_name=None, fmt="{:.2f}"):
+    d = df_in.sort_values(value_col, ascending=True).head(topn).iloc[::-1]
+    plt.figure(figsize=(10, max(6, topn * 0.45)))
+    bars = plt.barh(d[label_col], d[value_col])
+    for b, v in zip(bars, d[value_col]):
+        plt.text(v, b.get_y() + b.get_height()/2, fmt.format(v),
+                 va="center", ha="left", fontsize=9)
+    plt.title(title)
+    plt.xlabel(x_label if x_label else value_col)
+    plt.tight_layout()
+    if file_name:
+        path = os.path.join(CHART_DIR, file_name)
+        plt.savefig(path, dpi=300)
+        print("Saved:", path)
+    plt.show()
+
+# -------- Charts --------
+# 1) 2019 WFH rate Top 15
+barh_top(df, value_col="wfh19", topn=15,
+         title="Top 15 LADs by WFH Rate in 2019",
+         x_label="WFH rate (%)",
+         file_name="top15_wfh19.png",
+         fmt="{:.2f}%")
+
+# 2) 2021 WFH rate Top 15
+barh_top(df, value_col="wfh21", topn=15,
+         title="Top 15 LADs by WFH Rate in 2021",
+         x_label="WFH rate (%)",
+         file_name="top15_wfh21.png",
+         fmt="{:.2f}%")
+
+# 3) Absolute change (2019→2021) Top 15 (largest increases)
+barh_top(df, value_col="abs_change", topn=15,
+         title="Top 15 LADs by Absolute Change in WFH (2019–2021)",
+         x_label="Absolute change (percentage points)",
+         file_name="top15_abs_change.png",
+         fmt="{:.2f} pp")
+
+# 4) Smallest changes or declines (take smallest topn from smallest to largest)
+barh_bottom(df, value_col="abs_change", topn=15,
+            title="Bottom 15 LADs by Change in WFH (2019–2021) — Smallest / Declines",
+            x_label="Change (percentage points)",
+            file_name="bottom15_change.png",
+            fmt="{:.2f} pp")
+
+# 5) Top 15 declines only (if any exist)
+neg = df[df["abs_change"] < 0]
+if not neg.empty:
+    barh_bottom(neg, value_col="abs_change", topn=min(15, len(neg)),
+                title="Top 15 LADs with Declines in WFH (2019–2021)",
+                x_label="Change (percentage points)",
+                file_name="top15_declines.png",
+                fmt="{:.2f} pp")
+
+##3.TDABM (2019&2021)
+# -*- coding: utf-8 -*-
+"""
+TDABM (Lab-style) with paper-style options — NO label halo
+- Fixed colorbar range supported (e.g., (20,80) if coloration is a percentage)
+- Label color modes: 'black' (paper look) or 'same' (same as node color)
+- Colormap switch (e.g., 'jet' to mimic lab/paper look)
+"""
+
+import os
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import networkx as nx
+
+# ================= CONFIG =================
+INPUT = r"C:\Users\BFSU\Desktop\UoM\semester2\ERP\data\eda\datasetv6_consolidated_zscore.xlsx"
+SAVE_DIR = r"C:\Users\BFSU\Desktop\UoM\semester2\ERP\data\eda\tda_results"
+os.makedirs(SAVE_DIR, exist_ok=True)
+
+TARGET_COLS   = ["wfh19", "wfh21"]   # used ONLY for coloration (not used in distances)
+EPS_FINAL     = 3.5                  # <- set epsilon manually
+SPRING_K      = 0.4                  # Lab-like values: 0.3–0.5
+SPRING_SEED   = 7                    # reproducible layout
+
+# Visual controls
+CMAP            = "jet"              # 'jet' for paper/lab look; try 'turbo'/'Reds' etc.
+NODE_SIZE_SCALE = 22
+NODE_SIZE_MIN   = 60
+EDGE_ALPHA      = 0.30
+EDGE_COLOR      = "#9a9a9a"
+EDGE_WIDTH      = 1.0
+
+# New options (no white halo)
+LABEL_MODE   = "black"               # 'black' (paper style) or 'same' (same color as node)
+LABEL_FONTSZ = 9
+CBAR_RANGE   = None                  # e.g., (20, 80); keep None for auto range
+
+# ================= Ball Mapper core =================
+def farthest_point_sampling(X, eps, seed=42):
+    """Greedy farthest-point sampling until a full ε-cover is achieved."""
+    rng = np.random.default_rng(seed)
+    n = X.shape[0]
+    centers = [int(rng.integers(0, n))]
+    d2min = np.full(n, np.inf)
+    while True:
+        last = centers[-1]
+        diff = X - X[last]
+        d2 = np.einsum("ij,ij->i", diff, diff)
+        d2min = np.minimum(d2min, d2)
+        far = int(np.argmax(d2min))
+        if np.sqrt(d2min[far]) <= eps:
+            break
+        centers.append(far)
+        if len(centers) > n:  # safety
+            break
+    return centers
+
+def build_cover_sets(X, centers, eps):
+    """Indices of points covered by each ball of radius eps around center c."""
+    eps2 = eps * eps
+    return [np.where(np.einsum("ij,ij->i", X - X[c], X - X[c]) <= eps2)[0].tolist()
+            for c in centers]
+
+def build_graph(cover):
+    """BM graph: edge if two balls share at least one data point."""
+    G = nx.Graph()
+    G.add_nodes_from(range(len(cover)))
+    for i in range(len(cover)):
+        Si = set(cover[i])
+        for j in range(i + 1, len(cover)):
+            if Si.intersection(cover[j]):
+                G.add_edge(i, j)
+    return G
+
+def plot_bm_lab_style(X, df, eps, color_col, save_png,
+                      k=0.4, seed=7, cmap="jet",
+                      cbar_range=None, label_mode="black"):
+    """
+    Pure Lab-style TDABM plot (no boundary/filtering) with:
+      - spring_layout(k, seed)
+      - node labels = ball indices, no white halo
+      - optional fixed colorbar range
+    """
+    centers = farthest_point_sampling(X, eps, seed=seed)
+    cover   = build_cover_sets(X, centers, eps)
+    G       = build_graph(cover)
+
+    sizes  = np.array([len(m) for m in cover], dtype=float)
+    cmeans = np.array([df[color_col].iloc[m].mean() if len(m) else np.nan for m in cover], dtype=float)
+    if np.isnan(cmeans).any():  # safety
+        cmeans = np.where(np.isnan(cmeans), np.nanmedian(cmeans), cmeans)
+
+    pos = nx.spring_layout(G, k=k, seed=seed)
+
+    plt.figure(figsize=(9, 7))
+    nx.draw_networkx_edges(G, pos, alpha=EDGE_ALPHA, edge_color=EDGE_COLOR, width=EDGE_WIDTH)
+
+    # color scale
+    if cbar_range is None:
+        vmin, vmax = float(np.min(cmeans)), float(np.max(cmeans))
+    else:
+        vmin, vmax = cbar_range
+
+    nd = nx.draw_networkx_nodes(
+        G, pos,
+        node_size=sizes * NODE_SIZE_SCALE + NODE_SIZE_MIN,
+        node_color=cmeans, cmap=cmap, vmin=vmin, vmax=vmax,
+        linewidths=1.0, edgecolors="black"
+    )
+    plt.colorbar(nd, label=color_col)
+
+    # draw node labels (no halo)
+    if label_mode == "same":
+        norm = plt.Normalize(vmin=vmin, vmax=vmax)
+        cmap_obj = plt.cm.get_cmap(cmap)
+        for i, (x, y) in pos.items():
+            plt.text(x, y, str(i), ha="center", va="center",
+                     fontsize=LABEL_FONTSZ, color=cmap_obj(norm(cmeans[i])))
+    else:  # 'black'
+        labels = {i: f"{i}" for i in G.nodes()}
+        nx.draw_networkx_labels(G, pos, labels=labels,
+                                font_size=LABEL_FONTSZ, font_color="black")
+
+    plt.axis("off")
+    plt.title(f"Ball Mapper — {color_col} (ε={eps:.2f}, spring k={k}, seed={seed})")
+    plt.tight_layout()
+    plt.savefig(save_png, dpi=300)
+    plt.close()
+    print("Saved:", save_png)
+
+# ================= MAIN =================
+# 1) Load data
+df = pd.read_excel(INPUT)
+num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+
+# 2) Distance features: exclude coloration cols (wfh19/wfh21)
+feature_cols = [c for c in num_cols if c not in {"wfh19", "wfh21"}]
+
+# 3) Safety: median-impute NaNs for all numeric cols (features + coloration)
+df[num_cols] = df[num_cols].apply(lambda s: s.fillna(s.median()))
+
+# 4) Build feature matrix
+X = df[feature_cols].to_numpy(float)
+
+# 5) Plot for each coloration variable (Lab style + paper options)
+eps = EPS_FINAL
+print(f"[INFO] Using ε={eps:.2f}; features={len(feature_cols)}; layout=spring(k={SPRING_K}, seed={SPRING_SEED})")
+for col in TARGET_COLS:
+    out = os.path.join(SAVE_DIR, f"tda_{col}_eps{str(eps).replace('.','_')}_lab.png")
+    plot_bm_lab_style(
+        X, df, eps, color_col=col, save_png=out,
+        k=SPRING_K, seed=SPRING_SEED, cmap=CMAP,
+        cbar_range=CBAR_RANGE, label_mode=LABEL_MODE
+    )
+
+# (Optional) quick node-count scan to fine-tune epsilon:
+# for e in np.linspace(2.5, 4.5, 9):
+#     centers = farthest_point_sampling(X, e, seed=SPRING_SEED)
+#     cover   = build_cover_sets(X, centers, e)
+#     print(f"ε={e:.2f} -> balls={len(cover)}")
+
+##2021 with boundaries
+# -*- coding: utf-8 -*-
+"""
+BM plot: per-node outlier rings + shifted framing (right & down)
+- jet colormap; spring(k=0.4, seed=7)
+- High=top30%(P70), Low=bot30%(P30), Bridges=betweenness+mid color
+- Outliers: each node small red hollow ring; exclude rings inside ellipses
+- Framing: lock axes with asymmetric padding to move plot right & down
+- Safe saving: timestamp + auto _1,_2 if exists
+"""
+
+import os
+import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import networkx as nx
+from matplotlib.lines import Line2D
+from matplotlib.patches import Ellipse
+from pathlib import Path
+from datetime import datetime
+
+# ========================= PATHS =========================
+INPUT    = r"C:\Users\BFSU\Desktop\UoM\semester2\ERP\data\eda\datasetv6_consolidated_zscore.xlsx"
+SAVE_DIR = r"C:\Users\BFSU\Desktop\UoM\semester2\ERP\data\eda\tda_results"
+os.makedirs(SAVE_DIR, exist_ok=True)
+
+# Plot wfh21
+COLOR_COL  = "wfh21"
+FNAME_BASE = "tdabm_wfh21_eps3_5_wfh_top30_bot30"
+
+# ========================= BM PARAMS =========================
+EPS_FINAL   = 3.5
+SPRING_K    = 0.4
+SPRING_SEED = 7
+CMAP        = "jet"
+
+EXCLUDE_FOR_DISTANCE = {"wfh19", "wfh21"}  # color column(s) not used in distances
+
+# thresholds
+TOP_PCT_CORE   = 30
+BOT_PCT_LOW    = 30
+BRIDGE_BETW_Q  = 85
+BRIDGE_COL_LO  = 40
+BRIDGE_COL_HI  = 60
+BRIDGE_MIN_DEG = 2
+
+# Outlier rules
+DEG_MAX_ISO  = 1
+SIZE_PCT     = 10
+COLOR_PCT    = 15
+DIST_PCT     = 90
+MIN_REASONS  = 2
+REQUIRE_MAJOR_REASON = {"far_from_core", "attribute_high", "attribute_low"}
+
+# ========================= VISUAL =========================
+NODE_SIZE_SCALE = 22
+NODE_SIZE_MIN   = 60
+EDGE_ALPHA      = 0.30
+EDGE_COLOR      = "#9a9a9a"
+EDGE_WIDTH      = 1.0
+LABEL_FONTSZ    = 9
+
+# Ellipses: opaque border, light fill (alpha only in facecolor)
+ELLIPSE_STYLE = {
+    "core":   dict(edgecolor="#8A2BE2", facecolor=(138/255, 43/255, 226/255, 0.10), lw=2.4),
+    "low":    dict(edgecolor="#2F80ED", facecolor=(47/255, 128/255, 237/255, 0.08),  lw=2.3),
+    "bridge": dict(edgecolor="#27AE60", facecolor=(39/255, 174/255, 96/255, 0.08),   lw=2.3),
+}
+
+# Outlier small red rings
+RING_COLOR = "#E6194B"
+RING_S     = 220
+RING_LW    = 2.2
+
+# Framing: base padding + right/down shift ratios
+FRAME_PAD_FRAC    = 0.22  # base symmetric padding (relative to data span)
+SHIFT_RIGHT_FRAC  = 0.28  # shift right: increase left margin, decrease right margin
+SHIFT_DOWN_FRAC   = 0.28  # shift down: increase top margin, decrease bottom margin
+
+# ========================= SAVE HELPERS =========================
+def ensure_unique(path_str: str) -> str:
+    p = Path(path_str)
+    if not p.exists():
+        return str(p)
+    stem, suf = p.stem, p.suffix
+    i = 1
+    while True:
+        q = p.with_name(f"{stem}_{i}{suf}")
+        if not q.exists():
+            return str(q)
+        i += 1
+
+def make_out_path(save_dir: str, fname_base: str) -> str:
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    candidate = os.path.join(save_dir, f"{fname_base}_{stamp}.png")
+    return ensure_unique(candidate)
+
+# ========================= BM CORE =========================
+def farthest_point_sampling(X, eps, seed=42):
+    rng = np.random.default_rng(seed)
+    n = X.shape[0]
+    centers = [int(rng.integers(0, n))]
+    d2min = np.full(n, np.inf)
+    while True:
+        last = centers[-1]
+        diff = X - X[last]
+        d2 = np.einsum("ij,ij->i", diff, diff)
+        d2min = np.minimum(d2min, d2)
+        far = int(np.argmax(d2min))
+        if np.sqrt(d2min[far]) <= eps:
+            break
+        centers.append(far)
+        if len(centers) > n:
+            break
+    return centers
+
+def build_cover_sets(X, centers, eps):
+    eps2 = float(eps) * float(eps)
+    return [np.where(np.einsum("ij,ij->i", X - X[c], X - X[c]) <= eps2)[0].tolist()
+            for c in centers]
+
+def build_graph(cover):
+    G = nx.Graph()
+    G.add_nodes_from(range(len(cover)))
+    for i in range(len(cover)):
+        Si = set(cover[i])
+        for j in range(i + 1, len(cover)):
+            if Si.intersection(cover[j]):
+                G.add_edge(i, j)
+    return G
+
+def bm_compute(X, eps, seed, k):
+    centers = farthest_point_sampling(X, eps, seed=seed)
+    cover   = build_cover_sets(X, centers, eps)
+    G       = build_graph(cover)
+    sizes   = np.array([len(m) for m in cover], dtype=float)
+    pos     = nx.spring_layout(G, k=k, seed=seed)
+    return centers, cover, G, pos, sizes
+
+# ========================= HELPERS =========================
+def node_color_means(df, cover, color_col):
+    arr = np.full(len(cover), np.nan, float)
+    for i, idx in enumerate(cover):
+        if len(idx):
+            arr[i] = df[color_col].iloc[idx].mean()
+    if np.isnan(arr).any():
+        arr = np.where(np.isnan(arr), np.nanmedian(arr), arr)
+    return arr
+
+def node_centroids(X, cover):
+    d = X.shape[1]
+    C = np.full((len(cover), d), np.nan, float)
+    for i, idx in enumerate(cover):
+        if len(idx):
+            C[i, :] = X[idx, :].mean(axis=0)
+    return C
+
+def fit_cov_ellipse(points_xy, nsig=2.0):
+    P = np.asarray(points_xy, float)
+    if P.shape[0] < 3: return None
+    c = P.mean(axis=0); S = np.cov(P.T)
+    vals, vecs = np.linalg.eigh(S)
+    order = np.argsort(vals)[::-1]
+    vals, vecs = vals[order], vecs[:, order]
+    width, height = 2 * nsig * np.sqrt(vals)
+    angle = np.degrees(np.arctan2(vecs[1,0], vecs[0,0]))
+    return (c[0], c[1], width, height, angle)
+
+def draw_ellipse(ax, pos, nodes, style, nsig=2.0):
+    if not nodes: return None
+    pts = np.array([pos[i] for i in nodes], float)
+    params = fit_cov_ellipse(pts, nsig=nsig)
+    if params is None: return None
+    x0, y0, w, h, ang = params
+    el = Ellipse((x0, y0), width=w, height=h, angle=ang, **style)  # do not pass alpha
+    ax.add_patch(el)
+    return el
+
+# Ellipse params & test if a point lies outside the ellipse
+def ellipse_params_from_nodes(pos, nodes, nsig=2.0):
+    if not nodes: return None
+    pts = np.array([pos[i] for i in nodes], float)
+    return fit_cov_ellipse(pts, nsig=nsig)
+
+def point_outside_ellipse(pt, params):
+    if params is None:
+        return True
+    x0, y0, w, h, ang = params
+    ca, sa = np.cos(np.deg2rad(ang)), np.sin(np.deg2rad(ang))
+    dx, dy = pt[0] - x0, pt[1] - y0
+    xr =  ca*dx + sa*dy
+    yr = -sa*dx + ca*dy
+    return (xr**2) / ((w/2.0)**2) + (yr**2) / ((h/2.0)**2) > 1.0
+
+# ========================= CATEGORY PICKERS =========================
+def choose_core_nodes(G, color_vals, top_pct=30):
+    thr = np.nanpercentile(color_vals, 100 - top_pct)
+    candid = [i for i, v in enumerate(color_vals) if v >= thr]
+    H = G.subgraph(candid)
+    comps = list(nx.connected_components(H))
+    if not comps: return []
+    return sorted(list(max(comps, key=len)))
+
+def choose_low_nodes(G, color_vals, bot_pct=30):
+    thr = np.nanpercentile(color_vals, bot_pct)
+    candid = [i for i, v in enumerate(color_vals) if v <= thr]
+    H = G.subgraph(candid)
+    comps = list(nx.connected_components(H))
+    if not comps: return []
+    return sorted(list(max(comps, key=len)))
+
+def choose_bridge_nodes(G, color_vals, betw_q=85, col_lo=40, col_hi=60, min_deg=2):
+    betw = nx.betweenness_centrality(G, normalized=True)
+    bthr = np.nanpercentile(list(betw.values()), betw_q)
+    lo, hi = np.nanpercentile(color_vals, [col_lo, col_hi])
+    candid = [i for i in G.nodes()
+              if betw[i] >= bthr and lo <= color_vals[i] <= hi and G.degree(i) >= min_deg]
+    H = G.subgraph(candid)
+    comps = list(nx.connected_components(H))
+    if not comps: return []
+    return sorted(list(max(comps, key=len)))
+
+def collect_outliers(df, X, cover, G, color_vals, core_nodes,
+                     deg_max_iso=1, size_pct=10, color_pct=15, dist_pct=90,
+                     name_col=None):
+    n = len(cover)
+    sizes = np.array([len(m) for m in cover], float)
+    deg   = dict(G.degree())
+    comp_id = {u: cid for cid, comp in enumerate(nx.connected_components(G)) for u in comp}
+    size_thr = np.nanpercentile(sizes, size_pct) if n else np.nan
+    lo_thr, hi_thr = np.nanpercentile(color_vals, [color_pct, 100 - color_pct]) if n else (np.nan, np.nan)
+    C = node_centroids(X, cover)
+    core_centroid = np.nanmean(C[np.array(core_nodes, int), :], axis=0) if len(core_nodes) else np.nanmean(C, axis=0)
+    d2core = np.linalg.norm(C - core_centroid, axis=1)
+    dist_thr = np.nanpercentile(d2core, dist_pct) if n else np.nan
+
+    reasons = [[] for _ in range(n)]
+    for i in range(n):
+        if deg.get(i, 0) <= deg_max_iso:
+            reasons[i].append("structural_isolated")
+        if sizes[i] <= size_thr:
+            reasons[i].append("small_ball")
+        if color_vals[i] <= lo_thr:
+            reasons[i].append("attribute_low")
+        if color_vals[i] >= hi_thr:
+            reasons[i].append("attribute_high")
+        if d2core[i] >= dist_thr:
+            reasons[i].append("far_from_core")
+
+    rows = []
+    for i in range(n):
+        if reasons[i]:
+            rows.append({
+                "node": i,
+                "reasons": ",".join(reasons[i]),
+                "size": sizes[i],
+                "degree": deg.get(i, 0),
+                "component": comp_id.get(i, -1),
+                "color_mean": color_vals[i],
+                "dist_to_core": d2core[i]
+            })
+    return pd.DataFrame(rows).sort_values(["component","node"]).reset_index(drop=True)
+
+# ========================= PLOTTING =========================
+def set_axes_shifted(ax, pos, pad_frac=0.22, shift_right=0.28, shift_down=0.28):
+    """Lock axis limits based on node coordinates and shift the view right/down."""
+    xs = np.array([pos[i][0] for i in pos])
+    ys = np.array([pos[i][1] for i in pos])
+    xr = xs.max() - xs.min()
+    yr = ys.max() - ys.min()
+    padx = pad_frac * xr
+    pady = pad_frac * yr
+    # Asymmetric margins: larger left/top, smaller right/bottom -> visually shifted to bottom-right
+    left   = xs.min() - padx * (1 + shift_right)
+    right  = xs.max() + padx * (1 - shift_right)
+    bottom = ys.min() - pady * (1 - shift_down)
+    top    = ys.max() + pady * (1 + shift_down)
+    ax.set_xlim(left, right)
+    ax.set_ylim(bottom, top)
+
+def plot_repro(df, X, cover, G, pos, sizes, color_vals,
+               core_nodes, low_nodes, bridge_nodes, out_df, save_png):
+    vmin, vmax = float(np.nanmin(color_vals)), float(np.nanmax(color_vals))
+    fig, ax = plt.subplots(figsize=(9, 7))
+
+    # base
+    nx.draw_networkx_edges(G, pos, ax=ax, alpha=EDGE_ALPHA, edge_color=EDGE_COLOR, width=EDGE_WIDTH)
+    nd = nx.draw_networkx_nodes(
+        G, pos, ax=ax,
+        node_size=sizes * NODE_SIZE_SCALE + NODE_SIZE_MIN,
+        node_color=color_vals, cmap=CMAP, vmin=vmin, vmax=vmax,
+        linewidths=1.0, edgecolors="black"
+    )
+    cb = plt.colorbar(nd, ax=ax); cb.set_label(COLOR_COL)
+    nx.draw_networkx_labels(G, pos, ax=ax, font_size=LABEL_FONTSZ, font_color="black")
+
+    # Lock axes and shift to bottom-right
+    set_axes_shifted(ax, pos,
+                     pad_frac=FRAME_PAD_FRAC,
+                     shift_right=SHIFT_RIGHT_FRAC,
+                     shift_down=SHIFT_DOWN_FRAC)
+
+    # ellipses (opaque borders, light fills)
+    if core_nodes:   draw_ellipse(ax, pos, core_nodes,   ELLIPSE_STYLE["core"],   nsig=2.0)
+    if low_nodes:    draw_ellipse(ax, pos, low_nodes,    ELLIPSE_STYLE["low"],    nsig=2.0)
+    if bridge_nodes: draw_ellipse(ax, pos, bridge_nodes, ELLIPSE_STYLE["bridge"], nsig=2.0)
+
+    # Outliers: small red rings per point, and must lie outside all ellipses
+    core_params   = ellipse_params_from_nodes(pos, core_nodes,   nsig=2.0) if core_nodes   else None
+    low_params    = ellipse_params_from_nodes(pos, low_nodes,    nsig=2.0) if low_nodes    else None
+    bridge_params = ellipse_params_from_nodes(pos, bridge_nodes, nsig=2.0) if bridge_nodes else None
+    param_list = [p for p in (core_params, low_params, bridge_params) if p is not None]
+
+    grouped_set = set(core_nodes) | set(low_nodes) | set(bridge_nodes)
+    def keep_outlier(reason_str):
+        tags = set(t.strip() for t in reason_str.split(",") if t.strip())
+        if len(tags) < MIN_REASONS: return False
+        if tags.isdisjoint(REQUIRE_MAJOR_REASON): return False
+        return True
+
+    ring_nodes = []
+    for _, r in out_df.iterrows():
+        nid = int(r["node"])
+        if nid in grouped_set:
+            continue
+        if not keep_outlier(r["reasons"]):
+            continue
+        if param_list and not all(point_outside_ellipse(pos[nid], p) for p in param_list):
+            continue
+        ring_nodes.append(nid)
+
+    if ring_nodes:
+        xs = [pos[n][0] for n in ring_nodes]
+        ys = [pos[n][1] for n in ring_nodes]
+        ax.scatter(xs, ys, s=RING_S, facecolors='none',
+                   edgecolors=RING_COLOR, linewidths=RING_LW, zorder=6)
+
+    # legend: white background to avoid conflicts with marks in the top-left corner
+    handles = [
+        Line2D([0],[0], color=ELLIPSE_STYLE["core"]["edgecolor"],   lw=3, label="Purple — High WFH core"),
+        Line2D([0],[0], color=ELLIPSE_STYLE["low"]["edgecolor"],    lw=3, label="Blue — Low WFH areas"),
+        Line2D([0],[0], color=ELLIPSE_STYLE["bridge"]["edgecolor"], lw=3, label="Green — Bridges"),
+        Line2D([0],[0], marker='o', linestyle='', markerfacecolor="none",
+               markeredgecolor=RING_COLOR, markeredgewidth=RING_LW,
+               markersize=(RING_S ** 0.5) / 2.0, label="Red — Outliers"),
+    ]
+    ax.legend(handles=handles, loc="upper left", bbox_to_anchor=(0.02, 0.98),
+              frameon=True, facecolor="white", edgecolor="none", borderaxespad=0.5)
+
+    ax.set_axis_off()
+    ax.set_title(f"Ball Mapper — {COLOR_COL} (ε={EPS_FINAL:.2f}, spring k={SPRING_K}, seed={SPRING_SEED})")
+    fig.tight_layout()
+    fig.savefig(save_png, dpi=300)
+    plt.close(fig)
+    print("Saved:", save_png)
+
+# ========================= MAIN =========================
+df = pd.read_excel(INPUT)
+num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+feature_cols = [c for c in num_cols if c not in EXCLUDE_FOR_DISTANCE]
+df[num_cols] = df[num_cols].apply(lambda s: s.fillna(s.median()))
+X = df[feature_cols].to_numpy(float)
+
+centers, cover, G, pos, sizes = bm_compute(X, EPS_FINAL, seed=SPRING_SEED, k=SPRING_K)
+
+color_vals   = node_color_means(df, cover, COLOR_COL)
+core_nodes   = choose_core_nodes(G, color_vals, top_pct=TOP_PCT_CORE)
+low_nodes    = choose_low_nodes(G,  color_vals, bot_pct=BOT_PCT_LOW)
+bridge_nodes = choose_bridge_nodes(G, color_vals,
+                                   betw_q=BRIDGE_BETW_Q,
+                                   col_lo=BRIDGE_COL_LO, col_hi=BRIDGE_COL_HI,
+                                   min_deg=BRIDGE_MIN_DEG)
+
+out_df = collect_outliers(
+    df, X, cover, G, color_vals, core_nodes,
+    deg_max_iso=DEG_MAX_ISO, size_pct=SIZE_PCT,
+    color_pct=COLOR_PCT, dist_pct=DITST_PCT if 'DITST_PCT' in globals() else DIST_PCT,  # keep original variable if present
+    name_col=None
+)
+
+save_png = make_out_path(SAVE_DIR, FNAME_BASE)
+plot_repro(df, X, cover, G, pos, sizes, color_vals,
+           core_nodes, low_nodes, bridge_nodes, out_df, save_png)
