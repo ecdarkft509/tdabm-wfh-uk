@@ -1,0 +1,144 @@
+##1.Calculate coverage rates
+import geopandas as gpd
+import pandas as pd
+
+# ---------------- File paths ----------------
+# Local Authority (LA) boundaries
+la_path = r"C:\Users\BFSU\Desktop\UoM\semester2\ERP\data\LAdata\Local_Authority_Districts_May_2023_EW_BUC_-8744064012485962408\LAD_MAY_2023_EW_BUC_BESPOKE.shp"
+
+# Greenspace polygons
+gs_path = r"C:\Users\BFSU\Desktop\UoM\semester2\ERP\data\LAdata\Original\opgrsp_essh_gb\OS Open Greenspace (ESRI Shape File) GB\data\GB_GreenspaceSite.shp"
+
+# Output CSV
+out_csv = r"C:\Users\BFSU\Desktop\greenspace_coverage.csv"
+
+# ---------------- Load shapefiles ----------------
+la = gpd.read_file(la_path)   # Local Authorities
+gs = gpd.read_file(gs_path)   # Greenspace polygons
+
+# ---------------- Reproject to EPSG:27700 ----------------
+# British National Grid is used to calculate area in meters
+la = la.to_crs(epsg=27700)
+gs = gs.to_crs(epsg=27700)
+
+# ---------------- Calculate LA area ----------------
+la["LA_Area_m2"] = la.geometry.area   # Area of each Local Authority polygon
+
+# ---------------- Define public greenspace subset ----------------
+# Only keep six types considered as publicly accessible
+public_types = [
+    "Public Park Or Garden",
+    "Playing Field",
+    "Allotments Or Community Growing Spaces",
+    "Bowling Green",
+    "Tennis Court",
+    "Other Sports Facility"
+]
+gs_all = gs.copy()  # All greenspaces
+gs_pub = gs[gs["function"].isin(public_types)].copy()  # Public greenspaces
+
+# ---------------- Overlay (Intersection) ----------------
+# Intersect Greenspace with LA boundaries to split polygons crossing multiple LAs
+gsxla_all = gpd.overlay(gs_all, la, how="intersection")
+gsxla_pub = gpd.overlay(gs_pub, la, how="intersection")
+
+# ---------------- Calculate area of intersections ----------------
+gsxla_all["GS_Area_m2"] = gsxla_all.geometry.area
+gsxla_pub["GS_Area_m2"] = gsxla_pub.geometry.area
+
+# Group by LA code and sum
+all_sum = gsxla_all.groupby("LAD23CD")["GS_Area_m2"].sum().reset_index()
+all_sum.rename(columns={"GS_Area_m2": "GS_Area_All_m2"}, inplace=True)
+
+pub_sum = gsxla_pub.groupby("LAD23CD")["GS_Area_m2"].sum().reset_index()
+pub_sum.rename(columns={"GS_Area_m2": "GS_Area_Public_m2"}, inplace=True)
+
+# ---------------- Join results back to LA ----------------
+out = la[["LAD23CD", "LAD23NM", "LA_Area_m2"]].copy()
+out = out.merge(all_sum, on="LAD23CD", how="left")
+out = out.merge(pub_sum, on="LAD23CD", how="left")
+
+# Fill missing values with 0
+out = out.fillna(0)
+
+# ---------------- Calculate coverage rates ----------------
+out["GS_Cov_All_pct"] = out["GS_Area_All_m2"] / out["LA_Area_m2"] * 100
+out["GS_Cov_Public_pct"] = out["GS_Area_Public_m2"] / out["LA_Area_m2"] * 100
+
+# ---------------- Export CSV ----------------
+# Convert to DataFrame and drop geometry column safely
+out_df = pd.DataFrame(out)
+if "geometry" in out_df.columns:
+    out_df = out_df.drop(columns="geometry")
+
+out_df.to_csv(out_csv, index=False)
+
+print(" Done. CSV saved at:", out_csv)
+
+##2.Dealing with missing values and z-scored variables
+# -*- coding: utf-8 -*-
+# === Script to generate datasetv5: All variables z-scored ===
+# All numeric variables are z-scored; missing values filled with median
+
+import os, re
+import pandas as pd
+
+# -------------------- Paths --------------------
+BASE = r"C:\Users\BFSU\Desktop\UoM\semester2\ERP\data\LAdata\databasev2"
+INPUT = os.path.join(BASE, "datasetv4.xlsx")   # Input file path
+OUTPUT = os.path.join(BASE, "datasetv5.xlsx")  # Output file path
+
+# -------------------- Config --------------------
+ID_COLS = ["lad23cd", "lad23nm"]  # Geographic ID columns
+MISSING_COL_THRESHOLD = 0.30      # Missing value threshold (>30% drop column)
+EXCLUDE_PATTERNS = ["wfh19", "wfh21"]          
+
+# ---------- helper: pick feature columns ----------
+def pick_feature_cols(df):
+    """
+    Select numeric feature columns from dataframe (exclude ID and non-numeric columns)
+    """
+    cols = []
+    for c in df.columns:
+        if c in ID_COLS:  # Skip ID columns
+            continue
+        if df[c].dtype.kind not in "biufc":  # Skip non-numeric columns
+            continue
+        if not any(re.search(pat, c) for pat in EXCLUDE_PATTERNS):
+            cols.append(c)
+    return cols
+
+# ---------- preprocessing ----------
+def preprocess_all_zscore(df, feat_cols):
+    """
+    Apply z-score to all numeric variables (after filling missing values with median).
+    """
+    X = df[feat_cols].copy()
+
+    # 1) Drop columns with missing ratio > threshold
+    miss_ratio = X.isna().mean()
+    keep_cols = miss_ratio[miss_ratio <= MISSING_COL_THRESHOLD].index.tolist()
+    X = X[keep_cols]
+
+    # 2) Fill missing values with median
+    X = X.fillna(X.median(numeric_only=True))
+
+    # 3) Apply z-score to all kept columns
+    for c in X.columns:
+        s = X[c].astype(float)
+        mu, sd = s.mean(), s.std(ddof=0)
+        X[c] = 0.0 if sd == 0 else (s - mu) / sd
+    return X
+
+# -------------------- RUN --------------------
+df = pd.read_excel(INPUT)
+feat_cols = pick_feature_cols(df)             # Get feature columns
+Xz = preprocess_all_zscore(df, feat_cols)     # Preprocess data
+
+# Merge ID columns with processed features
+df_out = pd.concat([df[ID_COLS].reset_index(drop=True),
+                    Xz.reset_index(drop=True)], axis=1)
+
+# Save as datasetv5
+df_out.to_excel(OUTPUT, index=False)
+print(f"Processed datasetv5 (all z-scored) has been generated: {OUTPUT}")
