@@ -1,0 +1,343 @@
+##4.Robustness check
+#4.3.1.Hyperparameter tuning
+#Figure x. ε = 2.5, 3, 3.5 4 Coordination
+# ================== Compare different epsilons (no boundary) ==================
+EPS_LIST = [2.5, 3.0, 3.5, 4.0]
+
+def plot_bm_no_boundary(X, df, eps, color_col, save_png,
+                        k=0.4, seed=7, cmap="jet",
+                        cbar_range=None, label_mode="black"):
+    centers = farthest_point_sampling(X, eps, seed=seed)
+    cover   = build_cover_sets(X, centers, eps)
+    G       = build_graph(cover)
+
+    sizes  = np.array([len(m) for m in cover], dtype=float)
+    cmeans = np.array([df[color_col].iloc[m].mean() if len(m) else np.nan for m in cover], dtype=float)
+    if np.isnan(cmeans).any():
+        cmeans = np.where(np.isnan(cmeans), np.nanmedian(cmeans), cmeans)
+
+    pos = nx.spring_layout(G, k=k, seed=seed)
+
+    fig, ax = plt.subplots(figsize=(9, 7))
+    if USE_GRID_BG:
+        ax.set_facecolor(GRID_FACE)
+        ax.grid(True, color=GRID_COLOR, alpha=0.6, linestyle='-', linewidth=0.6)
+
+    nx.draw_networkx_edges(G, pos, ax=ax, alpha=EDGE_ALPHA,
+                           edge_color=EDGE_COLOR, width=EDGE_WIDTH)
+
+    # color scale
+    if cbar_range is None:
+        vmin, vmax = float(np.min(cmeans)), float(np.max(cmeans))
+    else:
+        vmin, vmax = cbar_range
+
+    nd = nx.draw_networkx_nodes(
+        G, pos, ax=ax,
+        node_size=sizes * NODE_SIZE_SCALE + NODE_SIZE_MIN,
+        node_color=cmeans, cmap=cmap, vmin=vmin, vmax=vmax,
+        linewidths=1.0, edgecolors="black"
+    )
+    cbar = fig.colorbar(nd, ax=ax, fraction=0.046, pad=0.04)
+    cbar.set_label(color_col)
+
+    # labels
+    if label_mode == "same":
+        norm = mpl.colors.Normalize(vmin=vmin, vmax=vmax)
+        cmap_obj = mpl.cm.get_cmap(cmap)
+        for i, (x, y) in pos.items():
+            ax.text(x, y, str(i), ha="center", va="center",
+                    fontsize=LABEL_FONTSZ, color=cmap_obj(norm(cmeans[i])))
+    else:
+        labels = {i: f"{i}" for i in G.nodes()}
+        nx.draw_networkx_labels(G, pos, labels=labels, ax=ax,
+                                font_size=LABEL_FONTSZ, font_color="black")
+
+    ax.set_axis_off()
+    ax.set_title(f"Ball Mapper — {color_col} (ε={eps:.2f}, spring k={k}, seed={seed})")
+    fig.tight_layout()
+    fig.savefig(save_png, dpi=300)
+    plt.close(fig)
+    print("Saved:", save_png)
+
+# ======= Main program: Multi-epsilon comparison =======
+print(f"[INFO] Compare epsilons {EPS_LIST}; features={len(feature_cols)}; layout=spring(k={SPRING_K}, seed={SPRING_SEED})")
+
+for col in TARGET_COLS:
+    for eps in EPS_LIST:
+        out = os.path.join(SAVE_DIR, f"tda_{col}_eps{str(eps).replace('.','_')}.png")
+        plot_bm_no_boundary(
+            X, df, eps, color_col=col, save_png=out,
+            k=SPRING_K, seed=SPRING_SEED, cmap=CMAP,
+            cbar_range=CBAR_RANGE, label_mode=LABEL_MODE
+        )
+#Figure 18. k = 0.05, 0.5, 1.0, 2.0 Coordination
+# Fixed epsilon, compare single graph outputs for different k
+EPS_FIXED = 3.5
+KS = [0.05, 0.5, 1.0, 2.0]     # Select a wider range of k for more obvious differences
+SPRING_SEED = 7
+
+# Ensure the save path exists
+SAVE_DIR = r"C:\Users\BFSU\Desktop\UoM\semester2\ERP\data\eda\tda_results"
+os.makedirs(SAVE_DIR, exist_ok=True)
+
+# First, unify the color bar range (only needs to be calculated once, independent of k)
+for col in TARGET_COLS:
+    centers_tmp = farthest_point_sampling(X, EPS_FIXED, seed=SPRING_SEED)
+    cover_tmp   = build_cover_sets(X, centers_tmp, EPS_FIXED)
+    cmeans_tmp  = np.array([df[col].iloc[m].mean() if len(m) else np.nan for m in cover_tmp], dtype=float)
+    cmeans_tmp  = np.where(np.isnan(cmeans_tmp), np.nanmedian(cmeans_tmp), cmeans_tmp)
+
+    vmin = float(np.nanpercentile(cmeans_tmp, 2))   # Avoid extreme values
+    vmax = float(np.nanpercentile(cmeans_tmp, 98))
+    cbar_range_fixed = (vmin, vmax)
+
+    # Generate graphs for each k, save to the specified path
+    for k in KS:
+        out = os.path.join(
+            SAVE_DIR,
+            f"tda_{col}_eps{str(EPS_FIXED).replace('.','_')}_k{str(k).replace('.','_')}.png"
+        )
+        plot_bm_no_boundary(
+            X, df, EPS_FIXED, color_col=col, save_png=out,
+            k=k, seed=SPRING_SEED, cmap=CMAP,
+            cbar_range=cbar_range_fixed, label_mode=LABEL_MODE
+        )
+
+#4.3.2.Empirical comparative analysis through input variable change
+#Variable Transformation
+import pandas as pd
+from sklearn.preprocessing import MinMaxScaler
+
+# File paths
+INPUT_ZS  = r"C:\Users\BFSU\Desktop\UoM\semester2\ERP\data\eda\datasetv6_consolidated_zscore.xlsx"
+OUTPUT_MM = r"C:\Users\BFSU\Desktop\UoM\semester2\ERP\data\eda\datasetv6_consolidated_minmax.xlsx"
+
+# 1) Read the zscore table
+df = pd.read_excel(INPUT_ZS)
+
+# 2) Columns to exclude (ID + coloring columns)
+exclude_cols = ["lad23cd", "lad23nm", "wfh19", "wfh21"]
+
+# 3) Identify numerical columns
+num_cols = [c for c in df.columns if c not in exclude_cols]
+
+# 4) Min–Max scaling
+scaler = MinMaxScaler()
+df[num_cols] = scaler.fit_transform(df[num_cols])
+
+# 5) Export the result
+df.to_excel(OUTPUT_MM, index=False)
+print(f"Min–max scaled dataset saved to: {OUTPUT_MM}")
+
+import os
+import pandas as pd
+
+# Paths
+INPUT_ZS  = r"C:\Users\BFSU\Desktop\UoM\semester2\ERP\data\eda\datasetv6_consolidated_zscore.xlsx"
+INPUT_MM  = r"C:\Users\BFSU\Desktop\UoM\semester2\ERP\data\eda\datasetv6_consolidated_minmax.xlsx"
+SAVE_DIR  = r"C:\Users\BFSU\Desktop\UoM\semester2\ERP\data\eda\tda_results"
+
+os.makedirs(SAVE_DIR, exist_ok=True)
+
+EPS_FIXED = 3.5
+K_FIXED   = 0.4
+SPRING_SEED = 7
+
+# ============ Functions ============
+
+def prepare_data(path):
+    df = pd.read_excel(path)
+    num_cols = df.select_dtypes(include=[float, int]).columns.tolist()
+    feature_cols = [c for c in num_cols if c not in {"wfh19", "wfh21"}]
+    # Handle missing values
+    df[num_cols] = df[num_cols].apply(lambda s: s.fillna(s.median()))
+    X = df[feature_cols].to_numpy(float)
+    return df, X
+
+# ============ Generate Plots ============
+for version, path in zip(["zscore", "minmax"], [INPUT_ZS, INPUT_MM]):
+    df, X = prepare_data(path)
+    for col in ["wfh19", "wfh21"]:
+        out = os.path.join(SAVE_DIR, f"tda_{col}_{version}_eps{str(EPS_FIXED).replace('.','_')}_k{str(K_FIXED)}.png")
+        plot_bm_no_boundary(
+            X, df, EPS_FIXED, color_col=col, save_png=out,
+            k=K_FIXED, seed=SPRING_SEED, cmap=CMAP,
+            label_mode=LABEL_MODE
+        )
+        print("Saved:", out)
+
+#Variable Aggregation
+import os
+import numpy as np
+import pandas as pd
+import networkx as nx
+
+# ================== Paths and Parameters ==================
+INPUT_RAW  = r"C:\Users\BFSU\Desktop\UoM\semester2\ERP\data\eda\datasetv6.xlsx"
+INPUT_CONS = r"C:\Users\BFSU\Desktop\UoM\semester2\ERP\data\eda\datasetv6_consolidated_zscore.xlsx"
+SAVE_DIR   = r"C:\Users\BFSU\Desktop\UoM\semester2\ERP\data\eda\tdarobustness"
+OUTPUT_XLSX = os.path.join(SAVE_DIR, "robustness_aggregation_2021.xlsx")
+os.makedirs(SAVE_DIR, exist_ok=True)
+
+EPS_RAW  = 4.0   # Original detailed categories (after zscore) ε
+EPS_CONS = 3.5   # Consolidated variables (zscore) ε
+SEED = 7
+
+# ================== Ball Mapper Basics ==================
+def farthest_point_sampling(X, eps, seed=42):
+    rng = np.random.default_rng(seed)
+    n = X.shape[0]
+    centers = [int(rng.integers(0, n))]
+    d2min = np.full(n, np.inf)
+    while True:
+        last = centers[-1]
+        diff = X - X[last]
+        d2 = np.einsum("ij,ij->i", diff, diff)
+        d2min = np.minimum(d2min, d2)
+        far = int(np.argmax(d2min))
+        if np.sqrt(d2min[far]) <= eps:
+            break
+        centers.append(far)
+        if len(centers) > n:
+            break
+    return centers
+
+def build_cover_sets(X, centers, eps):
+    eps2 = eps * eps
+    return [np.where(np.einsum("ij,ij->i", X - X[c], X - X[c]) <= eps2)[0].tolist()
+            for c in centers]
+
+def build_graph(cover):
+    G = nx.Graph()
+    G.add_nodes_from(range(len(cover)))
+    for i in range(len(cover)):
+        Si = set(cover[i])
+        for j in range(i + 1, len(cover)):
+            if Si.intersection(cover[j]):
+                G.add_edge(i, j)
+    return G
+
+# ================== Data Preparation ==================
+def prep_raw_zscore(path):
+    """Original detailed categories: median imputation + zscore; return df, X, feature column names"""
+    df = pd.read_excel(path)
+    num_cols = df.select_dtypes(include=[float, int]).columns.tolist()
+    df[num_cols] = df[num_cols].apply(lambda s: s.fillna(s.median()))
+    df[num_cols] = df[num_cols].apply(lambda x: (x - x.mean()) / x.std())
+    feat_cols = [c for c in num_cols if c not in {"wfh19","wfh21"}]
+    X = df[feat_cols].to_numpy(float)
+    return df, X, feat_cols
+
+def prep_consolidated(path):
+    """Consolidated variables: already zscore; median imputation; return df, X, feature column names"""
+    df = pd.read_excel(path)
+    num_cols = df.select_dtypes(include=[float, int]).columns.tolist()
+    df[num_cols] = df[num_cols].apply(lambda s: s.fillna(s.median()))
+    feat_cols = [c for c in num_cols if c not in {"wfh19","wfh21"}]
+    X = df[feat_cols].to_numpy(float)
+    return df, X, feat_cols
+
+# ================== Ball-level Aggregation and Grouping ==================
+def bm_ball_profiles(df, X, eps, seed=SEED):
+    centers = farthest_point_sampling(X, eps, seed=seed)
+    cover   = build_cover_sets(X, centers, eps)
+    G       = build_graph(cover)
+
+    cols_mean = ["wfh21"] + [c for c in df.columns if c not in {"lad23cd","lad23nm","wfh19"} and pd.api.types.is_numeric_dtype(df[c])]
+    rows = []
+    for i, idxs in enumerate(cover):
+        row = {"ball": i, "size": len(idxs)}
+        if len(idxs)==0:
+            for c in cols_mean: row[c] = np.nan
+        else:
+            for c in cols_mean: row[c] = float(np.nanmean(df[c].iloc[idxs]))
+        rows.append(row)
+    ball_df = pd.DataFrame(rows)
+    ball_df["degree"] = ball_df["ball"].map(dict(G.degree())).astype(float)
+    return ball_df, G, cover
+
+def classify_groups(ball_df, top_q=0.70, bot_q=0.30):
+    """High=top 30% (by wfh21 ball mean), Low=bottom 30%; Bridge=middle 40% with degree between 40–80 percentile"""
+    q_hi = ball_df["wfh21"].quantile(top_q)
+    q_lo = ball_df["wfh21"].quantile(bot_q)
+    cond_high = ball_df["wfh21"] >= q_hi
+    cond_low  = ball_df["wfh21"] <= q_lo
+    mid = ball_df.loc[~(cond_high | cond_low)].copy()
+    d_lo = mid["degree"].quantile(0.40)
+    d_hi = mid["degree"].quantile(0.80)
+    bridge = mid[(mid["degree"] >= d_lo) & (mid["degree"] <= d_hi)]
+
+    grp = pd.Series(index=ball_df.index, dtype="object")
+    grp.loc[cond_high] = "High"
+    grp.loc[cond_low]  = "Low"
+    grp.loc[bridge.index] = "Bridge"
+    return grp
+
+def group_means(ball_df, groups, cols):
+    return (ball_df.assign(group=groups.values)
+            .dropna(subset=["group"])
+            .groupby("group")[cols]
+            .mean()
+            .reindex(["High","Low","Bridge"]))
+
+def high_low_diff(ball_df, groups, cols):
+    tmp = ball_df.assign(group=groups.values).dropna(subset=["group"])
+    out = []
+    for c in cols:
+        a = tmp.loc[tmp["group"]=="High", c].dropna()
+        b = tmp.loc[tmp["group"]=="Low",  c].dropna()
+        diff = (a.mean()-b.mean()) if (len(a)>0 and len(b)>0) else np.nan
+        out.append({"metric": c, "diff_high_minus_low": diff})
+    return pd.DataFrame(out)
+
+# ================== Execution ==================
+df_raw,  X_raw,  feats_raw  = prep_raw_zscore(INPUT_RAW)
+df_cons, X_cons, feats_cons = prep_consolidated(INPUT_CONS)
+
+# Record the number of variables (distance features)
+n_raw, n_cons = len(feats_raw), len(feats_cons)
+print(f"[INFO] Distance features -> raw: {n_raw}, consolidated: {n_cons}")
+
+# Ball-level profiles
+balls_raw,  _, _ = bm_ball_profiles(df_raw,  X_raw,  EPS_RAW,  seed=SEED)
+balls_cons, _, _ = bm_ball_profiles(df_cons, X_cons, EPS_CONS, seed=SEED)
+
+# Grouping
+grp_raw  = classify_groups(balls_raw)
+grp_cons = classify_groups(balls_cons)
+
+# Respective specifications: group means & high-low differences (do not force column name alignment)
+cols_raw_for_stats  = [c for c in balls_raw.columns  if c not in {"ball","size","degree"}]
+cols_cons_for_stats = [c for c in balls_cons.columns if c not in {"ball","size","degree"}]
+
+sum_raw  = group_means(balls_raw,  grp_raw,  cols_raw_for_stats)
+sum_cons = group_means(balls_cons, grp_cons, cols_cons_for_stats)
+
+diff_raw  = high_low_diff(balls_raw,  grp_raw,  cols_raw_for_stats).rename(columns={"diff_high_minus_low":"diff_high_minus_low_raw"})
+diff_cons = high_low_diff(balls_cons, grp_cons, cols_cons_for_stats).rename(columns={"diff_high_minus_low":"diff_high_minus_low_cons"})
+
+# Intersection variables: Only perform "same_sign" comparison for columns common to both and numeric
+common_numeric = sorted(list(set(cols_raw_for_stats) & set(cols_cons_for_stats)))
+cmp_raw  = diff_raw[diff_raw["metric"].isin(common_numeric)]
+cmp_cons = diff_cons[diff_cons["metric"].isin(common_numeric)]
+cmp_tbl = cmp_raw.merge(cmp_cons, on="metric", how="outer")
+cmp_tbl["same_sign"] = np.sign(cmp_tbl["diff_high_minus_low_raw"]) == np.sign(cmp_tbl["diff_high_minus_low_cons"])
+
+# ================== Export ==================
+with pd.ExcelWriter(OUTPUT_XLSX, engine="xlsxwriter") as w:
+    # Variable count page (for easy reference in the paper)
+    pd.DataFrame({"spec":["raw_unaggregated","consolidated"],
+                  "num_distance_features":[n_raw, n_cons]}).to_excel(w, sheet_name="feature_counts", index=False)
+    # Original specification
+    sum_raw.to_excel(w,  sheet_name="summary_raw", float_format="%.6f")
+    diff_raw.to_excel(w, sheet_name="diffs_raw", index=False, float_format="%.6f")
+    # Consolidated specification
+    sum_cons.to_excel(w,  sheet_name="summary_consolidated", float_format="%.6f")
+    diff_cons.to_excel(w, sheet_name="diffs_consolidated", index=False, float_format="%.6f")
+    # Intersection variable comparison
+    cmp_tbl.to_excel(w,   sheet_name="sign_consistency_common", index=False, float_format="%.6f")
+
+print(f"[OK] Saved: {OUTPUT_XLSX}")
+print(f"#balls raw (eps={EPS_RAW}):  {balls_raw['ball'].nunique()}  |  #balls cons (eps={EPS_CONS}): {balls_cons['ball'].nunique()}")
+print("[INFO] Common comparable metrics:", common_numeric)
