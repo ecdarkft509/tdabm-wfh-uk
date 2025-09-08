@@ -1,0 +1,256 @@
+##Exploratory data analysis
+##1.Summary statitics
+import pandas as pd
+
+# File path to your dataset
+file_path = r"C:\Users\BFSU\Desktop\UoM\semester2\ERP\data\eda\datasetv6_consolidated.xlsx"
+
+# Read Excel file
+df = pd.read_excel(file_path)
+
+# Drop non-numeric columns (region code and region name)
+numeric_cols = df.drop(columns=["lad23cd", "lad23nm"])
+
+# Compute summary statistics (mean, std, min, Q1, median, Q3, max)
+summary = numeric_cols.describe(percentiles=[0.25, 0.5, 0.75]).T
+
+# Select and rename columns
+summary = summary[["mean", "std", "min", "25%", "50%", "75%", "max"]]
+summary.columns = ["Mean", "SD", "Min", "Q1", "Q2 (Median)", "Q3", "Max"]
+
+# Save to Excel file
+output_path = r"C:\Users\BFSU\Desktop\UoM\semester2\ERP\data\eda\summary_stats.xlsx"
+summary.to_excel(output_path)
+
+print("Summary statistics table saved to:", output_path)
+
+##Correlation heatmap
+import pandas as pd
+import seaborn as sns
+import matplotlib.pyplot as plt
+
+# File path
+file_path = r"C:\Users\BFSU\Desktop\UoM\semester2\ERP\data\eda\datasetv6_consolidated.xlsx"
+
+# Read dataset
+df = pd.read_excel(file_path)
+
+# Drop non-numeric columns
+numeric_df = df.drop(columns=["lad23cd", "lad23nm"])
+
+# Compute correlation matrix
+corr = numeric_df.corr()
+
+# Set figure size
+plt.figure(figsize=(16, 14))
+
+# Draw heatmap
+sns.heatmap(
+    corr,
+    annot=True,          # Show correlation values
+    fmt=".2f",           # Decimal format
+    cmap="coolwarm",     # Color map
+    center=0,            # Center color at 0
+    cbar_kws={"shrink": .8}  # Colorbar size
+)
+
+plt.title("Correlation Heatmap of Variables", fontsize=16)
+plt.tight_layout()
+
+# Save figure
+output_path = r"C:\Users\BFSU\Desktop\UoM\semester2\ERP\data\eda\correlation_heatmap.png"
+plt.savefig(output_path, dpi=300)
+
+plt.show()
+
+print("Correlation heatmap saved to:", output_path)
+
+##2.Pairplots of 16 variables (2019&2021)
+import pandas as pd
+import seaborn as sns
+import matplotlib.pyplot as plt
+
+# ---------------- Config ----------------
+file_path = r"C:\Users\BFSU\Desktop\UoM\semester2\ERP\data\eda\datasetv6_consolidated.xlsx"
+out_dir   = r"C:\Users\BFSU\Desktop\UoM\semester2\ERP\data\eda"
+
+# All variables you want to include (16 vars total, just example)
+all_vars_2019 = ["wfh19","edu_lowmid","edu_high","occ_high","occ_low","occ_other",
+                 "ind_traditional","ind_knowledge","ind_public","car_multi",
+                 "broadband_fibre","broadband_low10mbps","rent","pop_density",
+                 "age_working","age_nonwork"]
+
+# Split into two groups (8 + 8)
+vars_2019_part1 = all_vars_2019[:8]
+vars_2019_part2 = all_vars_2019[8:]
+
+# ---------------------------------------
+
+df = pd.read_excel(file_path)
+df = df.drop(columns=["lad23cd","lad23nm"], errors="ignore")
+
+def pairgrid_colored(data, cols, color_col, title, save_path):
+    data_sub = data[cols].dropna()
+    color_vals = data[color_col].loc[data_sub.index]
+
+    g = sns.PairGrid(data_sub, diag_sharey=False)
+
+    def scatter_color(x, y, **kwargs):
+        ax = plt.gca()
+        sc = ax.scatter(x, y,
+                        c=color_vals, cmap="viridis",
+                        s=12, alpha=0.5, edgecolors="none")
+        return sc
+
+    g.map_offdiag(scatter_color)
+    g.map_diag(sns.histplot, bins=20, kde=False)
+
+    # Add colorbar
+    mappable = None
+    for ax in g.axes.flat:
+        for coll in ax.collections:
+            if hasattr(coll, "get_array"):
+                mappable = coll
+    if mappable:
+        cax = g.fig.add_axes([0.94, 0.15, 0.02, 0.7])
+        cb = plt.colorbar(mappable, cax=cax)
+        cb.set_label(f"{color_col.upper()} (%)")
+
+    g.fig.suptitle(title, y=1.02, fontsize=14)
+    g.fig.tight_layout(rect=[0, 0, 0.92, 0.98])
+    g.fig.savefig(save_path, dpi=300)
+    print("Saved:", save_path)
+
+
+# --- Make two figures for 2019 ---
+pairgrid_colored(df, vars_2019_part1, "wfh19",
+    "Pairplot — 2019 (Part 1, colour = WFH %)",
+    fr"{out_dir}\pairplot_2019_part1.png")
+
+pairgrid_colored(df, vars_2019_part2, "wfh19",
+    "Pairplot — 2019 (Part 2, colour = WFH %)",
+    fr"{out_dir}\pairplot_2019_part2.png")
+
+import pandas as pd
+import seaborn as sns
+import matplotlib.pyplot as plt
+
+# ---------------- Config ----------------
+file_path = r"C:\Users\BFSU\Desktop\UoM\semester2\ERP\data\eda\datasetv6_consolidated.xlsx"
+out_dir   = r"C:\Users\BFSU\Desktop\UoM\semester2\ERP\data\eda"
+
+# 16 variables for 2021
+vars_2021 = ["wfh21","edu_lowmid","edu_high","occ_high","occ_low","occ_other",
+             "ind_traditional","ind_knowledge","ind_public","car_multi",
+             "broadband_fibre","broadband_low10mbps","rent","pop_density",
+             "age_working","age_nonwork"]
+
+# Split into two groups (8+8)
+vars_2021_part1, vars_2021_part2 = vars_2021[:8], vars_2021[8:]
+# ---------------------------------------
+
+df = pd.read_excel(file_path)
+df = df.drop(columns=["lad23cd","lad23nm"], errors="ignore")
+
+def pairgrid_colored(data, cols, color_col, title, save_path):
+    data_sub = data[cols].dropna()
+    color_vals = data[color_col].loc[data_sub.index]
+
+    g = sns.PairGrid(data_sub, diag_sharey=False)
+
+    def scatter_color(x, y, **kwargs):
+        ax = plt.gca()
+        sc = ax.scatter(x, y,
+                        c=color_vals, cmap="viridis",
+                        s=12, alpha=0.5, edgecolors="none")
+        return sc
+
+    g.map_offdiag(scatter_color)
+    g.map_diag(sns.histplot, bins=20, kde=False)
+
+    # Add colorbar
+    mappable = None
+    for ax in g.axes.flat:
+        for coll in ax.collections:
+            if hasattr(coll, "get_array"):
+                mappable = coll
+    if mappable:
+        cax = g.fig.add_axes([0.94, 0.15, 0.02, 0.7])
+        cb = plt.colorbar(mappable, cax=cax)
+        cb.set_label(f"{color_col.upper()} (%)")
+
+    g.fig.suptitle(title, y=1.02, fontsize=14)
+    g.fig.tight_layout(rect=[0, 0, 0.92, 0.98])
+    g.fig.savefig(save_path, dpi=300)
+    print("✅ Saved:", save_path)
+
+# --- 2021 ---
+pairgrid_colored(df, vars_2021_part1, "wfh21",
+    "Pairplot — 2021 (Part 1, colour = WFH %)",
+    fr"{out_dir}\pairplot_2021_part1.png")
+
+pairgrid_colored(df, vars_2021_part2, "wfh21",
+    "Pairplot — 2021 (Part 2, colour = WFH %)",
+    fr"{out_dir}\pairplot_2021_part2.png")
+##(3)Pairplot of key variables (2019&2021)
+import pandas as pd
+import seaborn as sns
+import matplotlib.pyplot as plt
+
+# ---------------- Config ----------------
+file_path = r"C:\Users\BFSU\Desktop\UoM\semester2\ERP\data\eda\datasetv6_consolidated.xlsx"
+out_dir   = r"C:\Users\BFSU\Desktop\UoM\semester2\ERP\data\eda"
+
+# Key variables for pairplot
+key_vars_2019 = ["wfh19", "occ_high", "occ_low", "edu_high", "edu_lowmid",
+                 "ind_knowledge", "rent", "broadband_fibre"]
+
+key_vars_2021 = ["wfh21", "occ_high", "occ_low", "edu_high", "edu_lowmid",
+                 "ind_knowledge", "rent", "broadband_fibre"]
+# ----------------------------------------
+
+# Read dataset
+df = pd.read_excel(file_path)
+df = df.drop(columns=["lad23cd", "lad23nm"], errors="ignore")
+
+def pairgrid_colored(data, cols, color_col, title, save_path):
+    data_sub = data[cols].dropna()
+    color_vals = data[color_col].loc[data_sub.index]
+
+    g = sns.PairGrid(data_sub, diag_sharey=False)
+
+    def scatter_color(x, y, **kwargs):
+        ax = plt.gca()
+        sc = ax.scatter(x, y,
+                        c=color_vals, cmap="viridis",
+                        s=14, alpha=0.5, edgecolors="none")
+        return sc
+
+    g.map_offdiag(scatter_color)
+    g.map_diag(sns.histplot, bins=20, kde=False)
+
+    # Add colorbar
+    mappable = None
+    for ax in g.axes.flat:
+        for coll in ax.collections:
+            if hasattr(coll, "get_array"):
+                mappable = coll
+    if mappable:
+        cax = g.fig.add_axes([0.94, 0.15, 0.02, 0.7])
+        cb = plt.colorbar(mappable, cax=cax)
+        cb.set_label(f"{color_col.upper()} (%)")
+
+    g.fig.suptitle(title, y=1.02, fontsize=14)
+    g.fig.tight_layout(rect=[0, 0, 0.92, 0.98])
+    g.fig.savefig(save_path, dpi=300)
+    print("Saved:", save_path)
+
+# --- 2019 ---
+pairgrid_colored(df, key_vars_2019, "wfh19",
+    "Pairplot — 2019 (Key Variables, colour = WFH %)",
+    fr"{out_dir}\pairplot_2019_key.png")
+
+# --- 2021 ---
+pairgrid_colored(df, key_vars_2021, "wfh21",
+    "Pairplot — 2021 (Key Variables, colour = WFH %)",
+    fr"{out_dir}\pairplot_2021_key.png")
